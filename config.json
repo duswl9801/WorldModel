@@ -1,0 +1,6 @@
+{
+  "action": {
+    "type": "ContinuousAction"
+  },
+  "lanes_count": 4
+}
