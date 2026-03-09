@@ -7,10 +7,13 @@ import json
 import cv2
 import pickle
 
-output_path = "./outputs"
+OUTPUT_PATH = "./outputs/"
+BUFFER_CAPACITY = 10000
+STEPS = 5000
+CROP_SIZE = (64, 64)
 
-def preprocess_frame(frame, size=(64, 64)):
-    frame = cv2.resize(frame, size) # downscale the image for model input
+def preprocess_frame(frame, size=CROP_SIZE):
+    frame = cv2.resize(frame, size) # downscale the image for model input               #??????????????????????????????????????????????????????????????????????????????????????????????What if I got it original size
     frame = frame.astype(np.float32) / 255.0 # normalize
     frame = np.transpose(frame, (2, 0, 1))  # HWC -> CHW
     return frame
@@ -107,12 +110,12 @@ def main():
     with open("config.json", "r") as f:
         config = json.load(f)
     env = gym.make("highway-v0", render_mode="rgb_array", config=config)
-    replay_buffer = ReplayBuffer(capacity=10000)
+    replay_buffer = ReplayBuffer(capacity=BUFFER_CAPACITY)
 
-    steps = 5000
+    steps = STEPS
 
     collect_random_steps(env=env, replay_buffer=replay_buffer, num_steps=steps)
-    replay_buffer.save(output_path + f"replay_buffer_{steps}.pkl")
+    replay_buffer.save(OUTPUT_PATH + f"replay_buffer_{steps}.pkl")
     print("Replay buffer saved.")
 
     print("Collected transitions:", len(replay_buffer))
