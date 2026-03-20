@@ -26,15 +26,15 @@ class Actor(nn.Module):
             nn.ELU(),
         )
 
-        # Separate heads for mean and log-std.
-        # mean controls the center of the Gaussian policy.
-        # log_std controls the spread (uncertainty / exploration).
+        # separate heads for mean and log-std
+        # mean controls the center of the Gaussian policy
+        # log_std controls the spread (uncertainty / exploration)
         self.mean_head = nn.Linear(hidden_dim, action_dim)
         self.log_std_head = nn.Linear(hidden_dim, action_dim)
 
-        # Clamp range for log_std to keep std numerically stable.
-        # If std becomes too small, training can get unstable.
-        # If std becomes too large, actions become too noisy.
+        # clamp range for log_std to keep std numerically stable
+        # if std becomes too small, training can get unstable
+        # if std becomes too large, actions become too noisy
         self.min_log_std = -5.0
         self.max_log_std = 2.0
 
@@ -49,15 +49,15 @@ class Actor(nn.Module):
         return mean, std
 
     # sample an action from the policy
-    # use thanh to squash the action into [-1, 1]
+    # use tanh to squash the action into [-1, 1]
     def sample_action(self, feat, deterministic=False):
         mean, std = self.forward(feat)
 
         if deterministic:
-            # deterministic policy: choose the mean action.
+            # deterministic policy: choose the mean action
             action = torch.tanh(mean)
         else:
-            # reparameterized sampling allows gradients to flow through the sample.
+            # reparameterized sampling allows gradients to flow through the sample
             dist = Normal(mean, std)
             raw_action = dist.rsample()  # reparameterized sample
 
@@ -97,6 +97,7 @@ class Critic(nn.Module):
 #
 # Role:
 #   Predict continuation probability c_t in [0,1] (probability that episode continues.)
+############################################################
 class ContinueModel(nn.Module):
     def __init__(self, feat_dim, hidden_dim):
         super().__init__()
@@ -119,15 +120,15 @@ class ContinueModel(nn.Module):
 #   - actor: policy network
 #   - critic: value network
 #
-# Assumptions for imagine_trajectory():
+# for imagine_trajectory():
 #   world_model.rssm.imagine(start_state, policy, horizon) returns
-#       an RSSMState sequence with shape (B, H, ...)
+#       RSSMState sequence. shape (B, H, ...)
 #
 #   world_model.rssm.get_feature(state_seq) returns
-#       imagined feature sequence with shape (B, H, feat_dim)
+#       imagined feature sequence. shape (B, H, feat_dim)
 #
 #   world_model.predict_reward(feat_seq) returns
-#       imagined rewards with shape (B, H, 1)
+#       imagined rewards. shape (B, H, 1)
 ############################################################
 class ActorCritic(nn.Module):
     def __init__(self, feat_dim, action_dim, hidden_dim, gamma=0.99, lambda_=0.95):
@@ -147,8 +148,8 @@ class ActorCritic(nn.Module):
     def value(self, feat):
         return self.critic(feat)
 
-    # Dreamer-style imagination in latent space.
-    # Start: real posterior latent state. Then, latent state -> actor action -> RSSM prior step -> next latent state
+    # Dreamer style imagination in latent space
+    # start: real posterior latent state. then, latent state -> actor action -> RSSM prior step -> next latent state
     def imagine_trajectory(self, world_model, start_state, horizon):
         imagined_states = world_model.imagine_rollout(
             policy=self.actor.sample_action,
@@ -163,7 +164,7 @@ class ActorCritic(nn.Module):
 
         return imagined_states, imagined_feats, imagined_rewards, imagined_values, imagined_cont
 
-    # Compute TD(lambda) targets on imagined trajectories.
+    # compute TD(lambda) targets on imagined trajectories
     # predicted rewards + predicted values + predicted discounts/continues -> lambda targets
     def compute_lambda_targets(self, rewards, values, continues, bootstrap=None):
         B, H, _ = rewards.shape

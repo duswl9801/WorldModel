@@ -1,12 +1,9 @@
 import torch
 import torch.nn as nn
 
-INPUT_CHANNEL = 3
-EMBEDDING_DIM = 4096
-
 # normalization for encoder
 class RMSNorm2d(nn.Module):
-    def __init__(self, in_channel):
+    def __init__(self, in_channel=3):
         super().__init__()
         self.eps = 1e-8
         # learnable scaling factor for each channel
@@ -17,14 +14,13 @@ class RMSNorm2d(nn.Module):
         x = x / rms
         return x * self.scale
 
-
 # refer dreamer_v3(couldn't find v1 code) encoder structure for image input. Norm:RMSNormalization, pooling: max pooling
 # representation extraction
 class Encoder(nn.Module):
-    def __init__(self):
+    def __init__(self, in_channel=3):
         super().__init__()
 
-        self.conv1 = nn.Conv2d(INPUT_CHANNEL, 32, kernel_size=3, padding=1)
+        self.conv1 = nn.Conv2d(in_channel, 32, kernel_size=3, padding=1)
         self.pool1 = nn.MaxPool2d(2) # 64 -> 32
         self.norm1 = RMSNorm2d(32)
 
@@ -43,10 +39,8 @@ class Encoder(nn.Module):
         self.gelu = nn.GELU()
 
         self.flatten = nn.Flatten()
-        #self.fc = nn.Linear(256*4*4, EMBEDDING_DIM)
 
-    def forward(self, frame):
-        #frame <- preprocessed frame
+    def forward(self, frame): #frame: preprocessed frame
         x = self.conv1(frame)
         x = self.pool1(x)
         x = self.norm1(x)
@@ -68,7 +62,6 @@ class Encoder(nn.Module):
         x = self.gelu(x)
 
         x = self.flatten(x)
-        # x = self.fc(x)
 
         return x
 
@@ -78,7 +71,6 @@ def main():
     dummy = torch.randn(8, 3, 64, 64)
     out = encoder(dummy)
     print(out.shape) # -> torch.Size([8, 4096])
-
 
 if __name__ == "__main__":
     main()

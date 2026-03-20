@@ -2,11 +2,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from encoder import Encoder
-from rssm import RSSM, RSSMState
+from models.encoder import Encoder
+from models.rssm import RSSM, RSSMState
 
 # reconstructing observation
-# output shape is same with preprocessed shape
+# output shape is the same as the preprocessed input frame shape
 class Decoder(nn.Module):
     def __init__(self, feat_dim, obs_shape, hidden_dims=None):
         super().__init__()
@@ -33,7 +33,6 @@ class Decoder(nn.Module):
         self.gelu = nn.GELU()
         self.sigmoid = nn.Sigmoid()
 
-
     def forward(self, feat):
         # output shape (B, T, 3, 64, 64)
         B, T, D = feat.shape
@@ -58,8 +57,7 @@ class Decoder(nn.Module):
 
         return x
 
-
-# calculating reward from the feature from rssm
+# predict reward from RSSM latent features
 class RewardModel(nn.Module):
     def __init__(self, feat_dim, hidden_dim):
         super().__init__()
@@ -77,7 +75,6 @@ class RewardModel(nn.Module):
 
     def forward(self, feat):
         return self.reward_mlp(feat)    # output shape (B, T, 1)
-
 
 class WorldModel(nn.Module):
     def __init__(self, obs_shape, action_dim, embedding_dim, deter_dim, stoch_dim, model_hidden_dim):
@@ -103,11 +100,11 @@ class WorldModel(nn.Module):
             std=torch.ones(batch_size, self.stoch_dim, device=device),
         )
 
-    def encode(self, processed_frames):
-        B, T, C, H, W = processed_frames.shape
+    def encode(self, processed_frame):
+        B, T, C, H, W = processed_frame.shape
 
-        processed_frames = processed_frames.reshape(B * T, C, H, W) # merge batch and time since the encoder expects 4D input
-        embed = self.encoder(processed_frames) # (B*T, embedding_dim)
+        processed_frame = processed_frame.reshape(B * T, C, H, W) # merge batch and time because the encoder expects 4D input
+        embed = self.encoder(processed_frame) # (B*T, embedding_dim)
         embed = embed.reshape(B, T, -1)
 
         return embed
@@ -121,15 +118,15 @@ class WorldModel(nn.Module):
         return prior
 
     def decode(self, feat):
-        reconstruct_obs = self.decoder(feat)
-        return reconstruct_obs
+        reconstruct_frame = self.decoder(feat)
+        return reconstruct_frame
 
     def predict_reward(self, feat):
         pred_reward = self.reward_model(feat)
         return  pred_reward
 
-    def forward(self, frames, action, state=None):
-        emb = self.encode(frames)
+    def forward(self, frame, action, state=None):
+        emb = self.encode(frame)
 
         post, prior = self.observe_rollout(emb, action, state)
         post_feat = self.rssm.get_feature(post)
@@ -139,12 +136,12 @@ class WorldModel(nn.Module):
 
         return post, prior, pred_reward, recons_frame
 
-    # ELBO(Evidence Lower Bound)
-    # 1. reward_loss (predicted reward vs. real reward)
-    # 2. kl_loss (prior vs, posterior)
-    # 3. recon_loss (reconstruction vs. original frame )
+    # world model losses inspired by the ELBO(Evidence Lower Bound)
+    # 1. reward_loss (predicted reward vs. target reward)
+    # 2. kl_loss (prior vs. posterior)
+    # 3. recon_loss (reconstructed frame vs. original frame )
     def compute_losses(self, frame, action, reward, state=None):
-        kl_scale = 1.0 # adjust after seeing the rewards
+        kl_scale = 1.0 # can be tuned later to balance reconstruction, reward, and KL losses
 
         post, prior, pred_reward, recon_obs = self.forward(frame, action, state)
 
@@ -223,30 +220,6 @@ def main():
     optimizer.zero_grad()
 
     print("optimizer step success")
-
-    """
-    feat_dim = 230
-    
-    decoder = Decoder(feat_dim, (8, 3, 64, 64), 200)
-    reward_model = RewardModel(feat_dim, hidden_dim=200)
-
-    # step unit
-    feat = torch.randn(8, 6,  feat_dim)
-    recon = decoder(feat)
-    reward = reward_model(feat)
-
-    print("step recon:", recon.shape)  # (8, 3, 64, 64)
-    print("step reward:", reward.shape)  # (8, 6. 1)
-
-    # sequence unit
-    feat_seq = torch.randn(4, 6, feat_dim)
-    recon_seq = decoder(feat_seq)
-    reward_seq = reward_model(feat_seq)
-
-    print("seq recon:", recon_seq.shape)  # (4, 6, 3, 64, 64)
-    print("seq reward:", reward_seq.shape)  # (4, 6, 1)
-    """
-
 
 if __name__ == "__main__":
     main()

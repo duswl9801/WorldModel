@@ -1,7 +1,5 @@
-import torch
-import torch.nn as nn
 from dataclasses import dataclass
-from nets import *
+from models.nets import *
 
 @dataclass
 class RSSMState:
@@ -9,7 +7,6 @@ class RSSMState:
     stoch: torch.Tensor # z_t
     mean: torch.Tensor  # mu_t
     std: torch.Tensor   # sigma_t
-
 
 class RSSM(nn.Module):
     def __init__(self, action_dim, embed_dim, deter_dim, stoch_dim, hidden_dim):
@@ -42,9 +39,9 @@ class RSSM(nn.Module):
         )
         prior_mean, prior_std = self.transition_model(cur_deter)
 
-        # Multivariate Gaussian Distribution Sampling. sample stochastic state from the prior Gaussian
+        # Multivariate Gaussian Distribution Sampling. sample the stochastic state from the prior Gaussian
         # using the reparameterization trick (for backpropagation)
-        eps = torch.randn_like(prior_std)   # sample prior_std_dimension size noise from N(0, 1)
+        eps = torch.randn_like(prior_std)   # sample noise with the same shape as prior_std from N(0, 1)
         prior_stoch = prior_mean + prior_std * eps # reparameterization trick
 
         prior_state = RSSMState(
@@ -56,11 +53,11 @@ class RSSM(nn.Module):
 
         return prior_state
 
-    # posterior step. compute posterior state using current embed and deter state
+    # posterior step. compute posterior state using the current embedding and deterministic state
     def posterior_step(self, embed, cur_deter):
         post_mean, post_std = self.representation_model(embed, cur_deter)
 
-        # Multivariate Gaussian Distribution Sampling. sample stochastic state from the posterior Gaussian
+        # Multivariate Gaussian Distribution Sampling. sample the stochastic state from the posterior Gaussian
         # using the reparameterization trick (for backpropagation)
         eps = torch.randn_like(post_std)
         post_stoch = post_mean + post_std * eps
@@ -74,15 +71,15 @@ class RSSM(nn.Module):
 
         return post_state
 
-    # rssm step. wrapper method for prior and posterior steps
+    # rssm step. compute the prior first, then refine it into the posterior
     def rssm_step(self, prev_state, prev_act, embed):
         prior_state = self.prior_step(prev_state, prev_act)
         post_state = self.posterior_step(embed, prior_state.deter)
         return post_state, prior_state
 
-    # T: sequence length. horizon: rollout length.
+    # T: sequence length
     # observe a sequence of embeddings and actions to produce posterior
-    # and prior state sequences for world model training.
+    # and prior state sequences for world model training
     def observe(self, embeds, actions, state=None):
 
         B, T, _ = embeds.shape
@@ -131,10 +128,11 @@ class RSSM(nn.Module):
 
         return post, prior
 
-    # imagine future states by rolling out the prior dynamics inside the world model.
+    # horizon: rollout length
+    # imagine future latent states by rolling out the prior dynamics in latent space
     def imagine(self, start_state, policy, horizon):
         state = start_state
-        prior_deters, prior_stochs, prior_means, prior_stds = [], [], [], [] # trajectories
+        prior_deters, prior_stochs, prior_means, prior_stds = [], [], [], [] # trajectory buffers
 
         for t in range(horizon):
             feat = self.get_feature(state)
@@ -159,7 +157,7 @@ class RSSM(nn.Module):
 
         return prior
 
-    # calculate KL divergence between two Gaussian(post, prior) to regularize posterior
+    # compute KL divergence between two Gaussian(post, prior) to encourage the post to stay close to the prior
     # posterior, prior: diagonal Gaussian -> use closed-form KL
     def kl_loss(self, post, prior, free_nats=0.0):
         post_mean, post_std = post.mean, post.std
@@ -181,6 +179,7 @@ class RSSM(nn.Module):
 
         return kl.mean() # mean over batch and time (scalar loss)
 
+    # concatenate deterministic and stochastic states into one latent feature
     def get_feature(self, state):
         return torch.cat([state.deter, state.stoch], dim=-1)
 
@@ -270,4 +269,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

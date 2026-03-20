@@ -7,7 +7,7 @@ import json
 import cv2
 import pickle
 
-OUTPUT_PATH = "./outputs/"
+OUTPUT_PATH = "../outputs/"
 BUFFER_CAPACITY = 10000
 STEPS = 5000
 CROP_SIZE = (64, 64)

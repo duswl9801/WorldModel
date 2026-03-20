@@ -19,8 +19,7 @@ class RecurrentModel(nn.Module):
 
         return h
 
-
-# h_t + obs_t -> stoch_t. Make parameters(mu, std) of stochastic ***distribution*** with observation and recurrent state
+# h_t + obs_t -> stoch_t. make parameters(mu, std) of stochastic *distribution* with observation and recurrent state
 class RepresentationModel(nn.Module):
     def __init__(self, observation_dim, deterministic_dim, stochastic_dim, hidden_dim):
         super().__init__()
@@ -42,8 +41,7 @@ class RepresentationModel(nn.Module):
 
         return mean, std
 
-
-# h_t -> stoch_hat_t. Make parameters(mu, std) of stochastic ***distribution*** only with recurrent state
+# h_t -> stoch_hat_t. make parameters(mu, std) of stochastic *distribution* only with recurrent state
 class TransitionModel(nn.Module):
     def __init__(self, deterministic_dim, stochastic_dim, hidden_dim):
         super().__init__()
@@ -84,7 +82,6 @@ def main():
     model = TransitionModel(200, 30, 400)
     tran_mean, tran_std = model(h_cur)
     print(tran_mean.shape, tran_std.shape)  # -> torch.Size([4, 30]) torch.Size([4, 30])
-
 
 if __name__ == "__main__":
     main()
