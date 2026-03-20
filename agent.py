@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 
 from models.rssm import RSSMState
@@ -77,10 +78,10 @@ class Agent:
     # and use it as the starting state for imagination rollout
     def last_state(self, state_seq):
         return RSSMState(
-            deter=state_seq.deter[:, -1],
-            stoch=state_seq.stoch[:, -1],
-            mean=state_seq.mean[:, -1],
-            std=state_seq.std[:, -1],
+            deter=state_seq.deter[:, -1].detach(),
+            stoch=state_seq.stoch[:, -1].detach(),
+            mean=state_seq.mean[:, -1].detach(),
+            std=state_seq.std[:, -1].detach(),
         )
 
     # action selection
@@ -89,9 +90,7 @@ class Agent:
         self.world_model.eval()
         self.actor_critic.eval()
 
-        frame = to_tensor(frame, self.device)
-        if frame.dim() == 3:
-            frame = frame.unsqueeze(0)  # (1, C, H, W)
+        frame = to_tensor(frame, self.device).unsqueeze(0)  # (1, C, H, W)
 
         embed = self.world_model.encoder(frame)  # (1, embedding_dim)
 
@@ -127,6 +126,8 @@ class Agent:
             frame=frames,
             action=actions,
             reward=rewards,
+            dones=dones,
+            truncateds=truncateds,
             state=init_state,
         )
 
@@ -143,6 +144,7 @@ class Agent:
             "wm_reward_loss": losses["reward_loss"].item(),
             "wm_recon_loss": losses["recon_loss"].item(),
             "wm_kl_loss": losses["kl_loss"].item(),
+            "wm_continue_loss": losses["continue_loss"].item(),
         }
 
     # actor-critic train
@@ -152,6 +154,10 @@ class Agent:
 
         frames, actions, _, _, _ = self.prepare_batch(batch)
         init_state = self.initial_state(frames.shape[0])
+
+        # freeze world model parameters during actor-critic update
+        for p in self.world_model.parameters():
+            p.requires_grad = False
 
         # posterior from real replay sequence
         post, _, _, _ = self.world_model(frames, actions, init_state)
@@ -196,6 +202,10 @@ class Agent:
 
         # clear possible leftover grads on world model from imagination graph
         self.wm_optimizer.zero_grad(set_to_none=True)
+
+        # unfreeze world model again
+        for p in self.world_model.parameters():
+            p.requires_grad = True
 
         return {
             "actor_loss": actor_loss.item(),

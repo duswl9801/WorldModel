@@ -76,6 +76,22 @@ class RewardModel(nn.Module):
     def forward(self, feat):
         return self.reward_mlp(feat)    # output shape (B, T, 1)
 
+# predict continuation probability c_t in [0,1] (probability that episode continues.)
+class ContinueModel(nn.Module):
+    def __init__(self, feat_dim, hidden_dim):
+        super().__init__()
+
+        self.net = nn.Sequential(
+            nn.Linear(feat_dim, hidden_dim),
+            nn.ELU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ELU(),
+            nn.Linear(hidden_dim, 1),
+        )
+
+    def forward(self, feat):
+        return torch.sigmoid(self.net(feat))
+
 class WorldModel(nn.Module):
     def __init__(self, obs_shape, action_dim, embedding_dim, deter_dim, stoch_dim, model_hidden_dim):
         super().__init__()
@@ -91,6 +107,7 @@ class WorldModel(nn.Module):
         self.rssm =  RSSM(self.action_dim,self.embedding_dim, self.deter_dim, self.stoch_dim, self.model_hidden_dim)
         self.decoder = Decoder(self.deter_dim + self.stoch_dim, self.obs_shape, self.model_hidden_dim)
         self.reward_model = RewardModel(self.deter_dim + self.stoch_dim, self.model_hidden_dim)
+        self.continue_model = ContinueModel(self.deter_dim + self.stoch_dim, self.model_hidden_dim)
 
     def initial_state(self, batch_size, device):
         return RSSMState(
@@ -125,6 +142,10 @@ class WorldModel(nn.Module):
         pred_reward = self.reward_model(feat)
         return  pred_reward
 
+    def predict_continue(self, feat):
+        pred_continue = self.continue_model(feat)
+        return pred_continue
+
     def forward(self, frame, action, state=None):
         emb = self.encode(frame)
 
@@ -140,86 +161,41 @@ class WorldModel(nn.Module):
     # 1. reward_loss (predicted reward vs. target reward)
     # 2. kl_loss (prior vs. posterior)
     # 3. recon_loss (reconstructed frame vs. original frame )
-    def compute_losses(self, frame, action, reward, state=None):
+    def compute_losses(self, frame, action, reward, dones=None, truncateds=None, state=None):
         kl_scale = 1.0 # can be tuned later to balance reconstruction, reward, and KL losses
+        continue_scale = 1.0  # tune later if needed
 
         post, prior, pred_reward, recon_obs = self.forward(frame, action, state)
+
+        # latent feature from posterior state
+        post_feat = self.rssm.get_feature(post)  # (B, T, feat_dim)
 
         reward_loss = F.mse_loss(pred_reward, reward)
         recon_loss = F.mse_loss(recon_obs, frame)
         kl_value = self.rssm.kl_loss(post, prior)
 
-        print("reward:", reward_loss.item())
-        print("recon:", recon_loss.item())
-        print("kl:", kl_value.item())
+        # initialize continue loss
+        continue_loss = torch.tensor(0.0, device=frame.device)
 
-        total_loss = reward_loss + recon_loss + kl_scale * kl_value
+        terminals = None
+        if dones is not None and truncateds is not None:
+            terminals = torch.maximum(dones.float(), truncateds.float())  # (B, T, 1)
+        elif dones is not None:
+            terminals = dones.float()
+        elif truncateds is not None:
+            terminals = truncateds.float()
+
+        if terminals is not None:
+            continue_target = 1.0 - terminals  # continue=1, terminal=0
+            pred_continue = self.predict_continue(post_feat)  # (B, T, 1)
+            continue_loss = F.binary_cross_entropy(pred_continue, continue_target) # continue model is binary
+
+        total_loss = reward_loss + recon_loss + kl_scale * kl_value + continue_scale * continue_loss
 
         return {
             "total_loss": total_loss,
             "reward_loss": reward_loss,
             "recon_loss": recon_loss,
             "kl_loss": kl_value,
+            "continue_loss": continue_loss,
         }
-
-
-def main():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    # dummy config
-    B = 4
-    T = 6
-    C, H, W = 3, 64, 64
-    action_dim = 3
-    embedding_dim = 4096  # encoder output dim
-    deter_dim = 200
-    stoch_dim = 30
-    model_hidden_dim = 200
-
-    # build world model
-    world_model = WorldModel(
-        obs_shape=(C, H, W),
-        action_dim=action_dim,
-        embedding_dim=embedding_dim,
-        deter_dim=deter_dim,
-        stoch_dim=stoch_dim,
-        model_hidden_dim=model_hidden_dim,
-    ).to(device)
-
-    # dummy batch
-    frames = torch.randn(B, T, C, H, W, device=device)
-    actions = torch.randn(B, T, action_dim, device=device)
-    rewards = torch.randn(B, T, 1, device=device)
-
-    # initial rssm state
-    init_state = world_model.initial_state(B, device)
-
-    print("===== forward test =====")
-    post, prior, pred_reward, recon_frame = world_model(frames, actions, init_state)
-
-    print("pred_reward shape:", pred_reward.shape)  # expected: (B, T, 1)
-    print("recon_frame shape:", recon_frame.shape)  # expected: (B, T, 3, 64, 64)
-    print("post.deter shape:", post.deter.shape)  # expected: (B, T, deter_dim)
-    print("post.stoch shape:", post.stoch.shape)  # expected: (B, T, stoch_dim)
-    print("prior.deter shape:", prior.deter.shape)  # expected: (B, T, deter_dim)
-    print("prior.stoch shape:", prior.stoch.shape)  # expected: (B, T, stoch_dim)
-
-    print("\n===== loss test =====")
-    losses = world_model.compute_losses(frames, actions, rewards, init_state)
-
-    for name, value in losses.items():
-        print(f"{name}: {value.item():.6f}")
-
-    print("\n===== backward test =====")
-    losses["total_loss"].backward()
-    print("backward success")
-
-    # optional optimizer step test
-    optimizer = torch.optim.Adam(world_model.parameters(), lr=1e-4)
-    optimizer.step()
-    optimizer.zero_grad()
-
-    print("optimizer step success")
-
-if __name__ == "__main__":
-    main()

@@ -93,27 +93,6 @@ class Critic(nn.Module):
         return self.value_net(feat) # (B, horizon, 1)
 
 ############################################################
-# ContinueModel
-#
-# Role:
-#   Predict continuation probability c_t in [0,1] (probability that episode continues.)
-############################################################
-class ContinueModel(nn.Module):
-    def __init__(self, feat_dim, hidden_dim):
-        super().__init__()
-
-        self.net = nn.Sequential(
-            nn.Linear(feat_dim, hidden_dim),
-            nn.ELU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ELU(),
-            nn.Linear(hidden_dim, 1),
-        )
-
-    def forward(self, feat):
-        return torch.sigmoid(self.net(feat))
-
-############################################################
 # ActorCritic wrapper
 #
 # This class bundles:
@@ -140,8 +119,6 @@ class ActorCritic(nn.Module):
         self.actor = Actor(feat_dim, action_dim, hidden_dim)
         self.critic = Critic(feat_dim, hidden_dim)
 
-        self.continue_model = ContinueModel(feat_dim, hidden_dim)
-
     def policy(self, feat, deterministic=False):
         return self.actor.sample_action(feat, deterministic)
 
@@ -160,7 +137,7 @@ class ActorCritic(nn.Module):
         imagined_feats = world_model.rssm.get_feature(imagined_states)
         imagined_rewards = world_model.predict_reward(imagined_feats)
         imagined_values = self.critic(imagined_feats)
-        imagined_cont = self.continue_model(imagined_feats)
+        imagined_cont = world_model.predict_continue(imagined_feats)
 
         return imagined_states, imagined_feats, imagined_rewards, imagined_values, imagined_cont
 
@@ -220,168 +197,3 @@ class ActorCritic(nn.Module):
         # maximize weighted lambda targets <=> minimize negative weighted return
         actor_loss = -(weights.detach() * lambda_targets).mean()
         return actor_loss
-
-
-def main():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    # dummy config
-    B = 4
-    H = 6
-    deter_dim = 200
-    stoch_dim = 30
-    feat_dim = deter_dim + stoch_dim
-    action_dim = 3
-    hidden_dim = 128
-
-    ############################################################
-    # Dummy RSSM state and dummy world model for testing
-    ############################################################
-    class DummyState:
-        def __init__(self, deter, stoch):
-            self.deter = deter
-            self.stoch = stoch
-
-    class DummyRSSM:
-        def __init__(self, deter_dim, stoch_dim, action_dim):
-            self.deter_dim = deter_dim
-            self.stoch_dim = stoch_dim
-            self.action_dim = action_dim
-
-        def get_feature(self, state):
-            # concat(deter, stoch) -> (B, H, feat_dim)
-            return torch.cat([state.deter, state.stoch], dim=-1)
-
-    class DummyWorldModel(nn.Module):
-        def __init__(self, deter_dim, stoch_dim, action_dim):
-            super().__init__()
-            self.rssm = DummyRSSM(deter_dim, stoch_dim, action_dim)
-
-            self.reward_head = nn.Sequential(
-                nn.Linear(deter_dim + stoch_dim, hidden_dim),
-                nn.ELU(),
-                nn.Linear(hidden_dim, 1),
-            )
-
-            self.action_to_deter = nn.Linear(action_dim, deter_dim)
-            self.deter_to_stoch = nn.Linear(deter_dim, stoch_dim)
-
-        def predict_reward(self, feat):
-            return self.reward_head(feat)  # (B, H, 1)
-
-        def imagine_rollout(self, policy, start_state, horizon):
-            deter = start_state.deter
-            stoch = start_state.stoch
-
-            deter_seq = []
-            stoch_seq = []
-
-            for t in range(horizon):
-                feat = torch.cat([deter, stoch], dim=-1)  # (B, feat_dim)
-
-                action = policy(feat)  # (B, action_dim)
-
-                # simple differentiable latent transition
-                next_deter = torch.tanh(deter + self.action_to_deter(action))
-                next_stoch = torch.tanh(self.deter_to_stoch(next_deter))
-
-                deter_seq.append(next_deter)
-                stoch_seq.append(next_stoch)
-
-                deter = next_deter
-                stoch = next_stoch
-
-            deter_seq = torch.stack(deter_seq, dim=1)  # (B, H, deter_dim)
-            stoch_seq = torch.stack(stoch_seq, dim=1)  # (B, H, stoch_dim)
-
-            return DummyState(deter_seq, stoch_seq)
-
-    ############################################################
-    # Build actor-critic and dummy world model
-    ############################################################
-    actor_critic = ActorCritic(
-        feat_dim=feat_dim,
-        action_dim=action_dim,
-        hidden_dim=hidden_dim,
-        gamma=0.99,
-        lambda_=0.95,
-    ).to(device)
-
-    world_model = DummyWorldModel(
-        deter_dim=deter_dim,
-        stoch_dim=stoch_dim,
-        action_dim=action_dim,
-    ).to(device)
-
-    ############################################################
-    # Dummy start state: real posterior state at current time
-    ############################################################
-    start_state = DummyState(
-        deter=torch.randn(B, deter_dim, device=device),
-        stoch=torch.randn(B, stoch_dim, device=device),
-    )
-
-    ############################################################
-    # 1. Policy test
-    ############################################################
-    print("===== policy test =====")
-    start_feat = torch.cat([start_state.deter, start_state.stoch], dim=-1)
-    sampled_action = actor_critic.policy(start_feat)
-    print("sampled_action shape:", sampled_action.shape)  # (B, action_dim)
-
-    ############################################################
-    # 2. Imagine trajectory test
-    ############################################################
-    print("\n===== imagine trajectory test =====")
-    imagined_states, imagined_feats, imagined_rewards, imagined_values, imagined_cont = \
-        actor_critic.imagine_trajectory(world_model, start_state, H)
-
-    print("imagined_feats shape:", imagined_feats.shape)  # (B, H, feat_dim)
-    print("imagined_rewards shape:", imagined_rewards.shape)  # (B, H, 1)
-    print("imagined_values shape:", imagined_values.shape)  # (B, H, 1)
-    print("imagined_cont shape:", imagined_cont.shape)  # (B, H, 1)
-
-    ############################################################
-    # 3. Lambda target test
-    ############################################################
-    print("\n===== lambda target test =====")
-    bootstrap = imagined_values[:, -1].detach()  # (B, 1)
-    lambda_targets = actor_critic.compute_lambda_targets(
-        rewards=imagined_rewards,
-        values=imagined_values,
-        continues=imagined_cont,
-        bootstrap=bootstrap,
-    )
-    print("lambda_targets shape:", lambda_targets.shape)  # (B, H, 1)
-
-    ############################################################
-    # 4. Loss test
-    ############################################################
-    print("\n===== loss test =====")
-    critic_loss = actor_critic.compute_critic_loss(imagined_feats, lambda_targets)
-    actor_loss = actor_critic.compute_actor_loss(lambda_targets, imagined_cont)
-
-    total_loss = actor_loss + critic_loss
-
-    print(f"actor_loss:  {actor_loss.item():.6f}")
-    print(f"critic_loss: {critic_loss.item():.6f}")
-    print(f"total_loss:  {total_loss.item():.6f}")
-
-    ############################################################
-    # 5. Backward test
-    ############################################################
-    print("\n===== backward test =====")
-    optimizer = torch.optim.Adam(
-        list(actor_critic.parameters()) + list(world_model.parameters()),
-        lr=1e-4,
-    )
-
-    optimizer.zero_grad()
-    total_loss.backward()
-    optimizer.step()
-
-    print("backward success")
-    print("optimizer step success")
-
-if __name__ == "__main__":
-    main()
