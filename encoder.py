@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 INPUT_CHANNEL = 3
-EMBEDDING_DIM = 1024
+EMBEDDING_DIM = 4096
 
 # normalization for encoder
 class RMSNorm2d(nn.Module):

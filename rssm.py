@@ -77,22 +77,26 @@ class RSSM(nn.Module):
     # rssm step. wrapper method for prior and posterior steps
     def rssm_step(self, prev_state, prev_act, embed):
         prior_state = self.prior_step(prev_state, prev_act)
-        posterior_state = self.posterior_step(embed, prior_state.deter)
-        return posterior_state, prior_state
+        post_state = self.posterior_step(embed, prior_state.deter)
+        return post_state, prior_state
 
     # T: sequence length. horizon: rollout length.
     # observe a sequence of embeddings and actions to produce posterior
     # and prior state sequences for world model training.
-    def observe(self, embeds, actions):
+    def observe(self, embeds, actions, state=None):
+
         B, T, _ = embeds.shape
 
-        state = self.initial_state(B, embeds.device)
+        if state is None:
+            state = self.initial_state(B, embeds.device)
+        else:
+            state = state
 
         prior_deters, prior_stochs, prior_means, prior_stds = [], [], [], []
         post_deters, post_stochs, post_means, post_stds = [], [], [], []
 
         for t in range(T):
-            prior_state, post_state = self.rssm_step(
+            post_state, prior_state = self.rssm_step(
                 prev_state=state,
                 prev_act=actions[:, t],
                 embed=embeds[:, t]
@@ -154,6 +158,28 @@ class RSSM(nn.Module):
         )
 
         return prior
+
+    # calculate KL divergence between two Gaussian(post, prior) to regularize posterior
+    # posterior, prior: diagonal Gaussian -> use closed-form KL
+    def kl_loss(self, post, prior, free_nats=0.0):
+        post_mean, post_std = post.mean, post.std
+        prior_mean, prior_std = prior.mean, prior.std
+
+        post_var = post_std.pow(2)
+        prior_var = prior_std.pow(2)
+
+        kl = torch.log(prior_std) - torch.log(post_std)
+        kl += (post_var + (post_mean - prior_mean).pow(2)) / (2.0 * prior_var)
+        kl -= 0.5
+
+        # sum over stochastic dimension
+        kl = kl.sum(dim=-1)  # (B, T, S) -> (B, T)
+
+        # apply minimum KL threshold to avoid over-penalizing small KL values
+        if free_nats > 0.0:
+            kl = torch.clamp(kl, min=free_nats)
+
+        return kl.mean() # mean over batch and time (scalar loss)
 
     def get_feature(self, state):
         return torch.cat([state.deter, state.stoch], dim=-1)
