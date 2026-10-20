@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 from datetime import datetime
 import imageio
+from PIL import Image
 
 def preprocess_frame(frame, crop_size):
     frame = cv2.resize(frame, crop_size) # downscale the image for model input
@@ -159,3 +160,42 @@ def save_target_recon_video(target_frames, recon_frames, run_dir, fps=10):
         video_frames.append(combined)
 
     imageio.mimsave(run_dir, video_frames, fps=fps)
+
+# debug reconstruction
+def save_reconstruction_grid(frames, recons, debug_dir, max_t=8):
+    """
+    frames:  (B, T, C, H, W)
+    recons:  (B, T, C, H, W)
+    save_path: output image path
+    """
+    os.makedirs(os.path.dirname(debug_dir), exist_ok=True)
+
+    # first batch only
+    frames = frames[0].detach().cpu()
+    recons = recons[0].detach().cpu()
+
+    T = min(frames.shape[0], max_t)
+
+    rows = []
+    for t in range(T):
+        gt = frames[t]
+        rc = recons[t]
+
+        # CHW -> HWC
+        gt = gt.permute(1, 2, 0).numpy()
+        rc = rc.permute(1, 2, 0).numpy()
+
+        # assume normalized to [0,1]
+        gt = np.clip(gt, 0.0, 1.0)
+        rc = np.clip(rc, 0.0, 1.0)
+
+        gt = (gt * 255).astype(np.uint8)
+        rc = (rc * 255).astype(np.uint8)
+
+        # concat original and recon horizontally
+        pair = np.concatenate([gt, rc], axis=1)
+        rows.append(pair)
+
+    # stack time steps vertically
+    grid = np.concatenate(rows, axis=0)
+    Image.fromarray(grid).save(debug_dir)

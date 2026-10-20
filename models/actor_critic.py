@@ -31,12 +31,14 @@ class Actor(nn.Module):
         # log_std controls the spread (uncertainty / exploration)
         self.mean_head = nn.Linear(hidden_dim, action_dim)
         self.log_std_head = nn.Linear(hidden_dim, action_dim)
+        # initialize the log-std bias to a negative value for more stable early training
+        nn.init.constant_(self.log_std_head.bias, -2.0)
 
         # clamp range for log_std to keep std numerically stable
         # if std becomes too small, training can get unstable
         # if std becomes too large, actions become too noisy
         self.min_log_std = -5.0
-        self.max_log_std = 2.0
+        self.max_log_std = 0.0
 
     def forward(self, feat):
         h = self.actor_net(feat)

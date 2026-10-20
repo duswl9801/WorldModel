@@ -116,7 +116,7 @@ class Agent:
         return action.squeeze(0).cpu().numpy(), post_state
 
     # world model train
-    def train_world_model(self, batch):
+    def train_world_model(self, batch, step=None):
         self.world_model.train()
 
         frames, actions, rewards, dones, truncateds = self.prepare_batch(batch)
@@ -130,6 +130,22 @@ class Agent:
             truncateds=truncateds,
             state=init_state,
         )
+
+        # save reconstructions occasionally
+        if step is not None and step % 200 == 0:
+            with torch.no_grad():
+                post, prior, pred_reward, recon_obs = self.world_model(
+                    frame=frames,
+                    action=actions,
+                    state=init_state,
+                )
+
+            save_reconstruction_grid(
+                frames=frames,
+                recons=recon_obs,
+                debug_dir=os.path.join(self.config.debug_dir, f"recon_step_{step}.png"),
+                max_t=8,
+            )
 
         self.wm_optimizer.zero_grad()
         losses["total_loss"].backward()
@@ -148,7 +164,7 @@ class Agent:
         }
 
     # actor-critic train
-    def train_actor_critic(self, batch):
+    def train_actor_critic(self, batch, step=None):
         self.world_model.train()
         self.actor_critic.train()
 
@@ -179,6 +195,45 @@ class Agent:
             continues=imagined_cont,
             bootstrap=bootstrap,
         )
+
+        #####DEBUG
+        if step is not None and step % 200 == 0:
+            reward_flat = imagined_rewards.detach().reshape(-1)
+            value_flat = imagined_values.detach().reshape(-1)
+            cont_flat = imagined_cont.detach().reshape(-1)
+            target_flat = lambda_targets.detach().reshape(-1)
+
+            print(
+                f"[step {step}] imagined reward | "
+                f"mean={reward_flat.mean().item():.4f} "
+                f"std={reward_flat.std().item():.4f} "
+                f"min={reward_flat.min().item():.4f} "
+                f"max={reward_flat.max().item():.4f}"
+            )
+
+            print(
+                f"[step {step}] imagined value | "
+                f"mean={value_flat.mean().item():.4f} "
+                f"std={value_flat.std().item():.4f} "
+                f"min={value_flat.min().item():.4f} "
+                f"max={value_flat.max().item():.4f}"
+            )
+
+            print(
+                f"[step {step}] imagined continue | "
+                f"mean={cont_flat.mean().item():.4f} "
+                f"std={cont_flat.std().item():.4f} "
+                f"min={cont_flat.min().item():.4f} "
+                f"max={cont_flat.max().item():.4f}"
+            )
+
+            print(
+                f"[step {step}] lambda target | "
+                f"mean={target_flat.mean().item():.4f} "
+                f"std={target_flat.std().item():.4f} "
+                f"min={target_flat.min().item():.4f} "
+                f"max={target_flat.max().item():.4f}"
+            )
 
         actor_loss = self.actor_critic.compute_actor_loss(
             lambda_targets=lambda_targets,

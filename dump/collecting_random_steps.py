@@ -107,6 +107,7 @@ def collect_random_steps(env, replay_buffer, num_steps):
             episode_count += 1
 
 def main():
+    """
     with open("config.json", "r") as f:
         config = json.load(f)
     env = gym.make("highway-v0", render_mode="rgb_array", config=config)
@@ -128,8 +129,10 @@ def main():
     print("Done:", sample["done"])
 
     env.close()
-
     """
+
+    env = gym.make("highway-v0", render_mode="rgb_array")
+
     obs, info = env.reset()
 
     print("Observation type:", type(obs))
@@ -141,14 +144,11 @@ def main():
 
     frame = env.render()
     print("Rendered frame shape:", frame.shape)
-
-    """""""
     
     plt.imshow(frame)
     plt.title("highway-v0 first frame")
     plt.axis("off")
     plt.show()
-    """"""
 
     # run episode with random action
     done = False
@@ -178,7 +178,7 @@ def main():
     print("Total reward:", total_reward)
     
     env.close()
-    """
+
 
 if __name__ == "__main__":
     main()

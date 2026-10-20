@@ -16,19 +16,13 @@ class Decoder(nn.Module):
         self.hidden_dims = hidden_dims
 
         # try mirroring encoder
-        self.fc = nn.Linear(feat_dim, 256*4*4)
+        self.fc = nn.Linear(feat_dim, 512 * 4 * 4)
 
-        # 4x4 -> 8x8
-        self.conv1 = nn.Conv2d(256, 128, kernel_size=3, padding=1)
-
-        # 8x8 -> 16x16
-        self.conv2 = nn.Conv2d(128, 64, kernel_size=3, padding=1)
-
-        # 16x16 -> 32x32
-        self.conv3 = nn.Conv2d(64, 32, kernel_size=3, padding=1)
-
-        # 32x32 -> 64x64
-        self.conv4 = nn.Conv2d(32, 3, kernel_size=3, padding=1)
+        self.conv1 = nn.Conv2d(512, 256, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(256, 256, kernel_size=3, padding=1)
+        self.conv2_a = nn.Conv2d(256, 128, kernel_size=3, padding=1)
+        self.conv3 = nn.Conv2d(128, 64, kernel_size=3, padding=1)
+        self.conv4 = nn.Conv2d(64, 3, kernel_size=3, padding=1)
 
         self.gelu = nn.GELU()
         self.sigmoid = nn.Sigmoid()
@@ -39,16 +33,18 @@ class Decoder(nn.Module):
         feat = feat.reshape(B*T, D)
 
         x = self.fc(feat)
-        x = x.view(-1, 256, 4, 4)  # (B*T, 256, 4, 4)
+        x = x.view(-1, 512, 4, 4)  # (B*T, 512, 4, 4)
 
         x = F.interpolate(x, scale_factor=2, mode="nearest")  # 4 -> 8
-        x = self.gelu(self.conv1(x))  # (B*T, 128, 8, 8)
+        x = self.gelu(self.conv1(x))  # (B*T, 256, 8, 8)
 
         x = F.interpolate(x, scale_factor=2, mode="nearest")  # 8 -> 16
-        x = self.gelu(self.conv2(x))  # (B*T, 64, 16, 16)
+        x = self.gelu(self.conv2(x)) # (B*T, 256, 16, 16)
+
+        x = self.gelu(self.conv2_a(x))   # (B*T, 128, 16, 16)
 
         x = F.interpolate(x, scale_factor=2, mode="nearest")  # 16 -> 32
-        x = self.gelu(self.conv3(x))  # (B*T, 32, 32, 32)
+        x = self.gelu(self.conv3(x))  # (B*T, 64, 32, 32)
 
         x = F.interpolate(x, scale_factor=2, mode="nearest")  # 32 -> 64
         x = self.sigmoid(self.conv4(x))  # (B*T, 3, 64, 64)
@@ -162,8 +158,9 @@ class WorldModel(nn.Module):
     # 2. kl_loss (prior vs. posterior)
     # 3. recon_loss (reconstructed frame vs. original frame )
     def compute_losses(self, frame, action, reward, dones=None, truncateds=None, state=None):
-        kl_scale = 1.0 # can be tuned later to balance reconstruction, reward, and KL losses
-        continue_scale = 1.0  # tune later if needed
+        kl_scale = 0.1 # can be tuned later to balance reconstruction, reward, and KL losses
+        continue_scale = 0.25 # tune later if needed
+        reward_scale = 1.5
 
         post, prior, pred_reward, recon_obs = self.forward(frame, action, state)
 
@@ -190,7 +187,7 @@ class WorldModel(nn.Module):
             pred_continue = self.predict_continue(post_feat)  # (B, T, 1)
             continue_loss = F.binary_cross_entropy(pred_continue, continue_target) # continue model is binary
 
-        total_loss = reward_loss + recon_loss + kl_scale * kl_value + continue_scale * continue_loss
+        total_loss = reward_scale * reward_loss + recon_loss + kl_scale * kl_value + continue_scale * continue_loss
 
         return {
             "total_loss": total_loss,

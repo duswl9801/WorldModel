@@ -4,7 +4,9 @@ from dataclasses import dataclass, field, asdict
 
 @dataclass
 class Config:
-    output_dir: str = "/content/drive/MyDrive/WorldModel/outputs"
+    output_dir: str = "/content/drive/MyDrive/Colab_Notebooks/WorldModel/outputs"
+    debug_dir: str = "/content/drive/MyDrive/Colab_Notebooks/WorldModel/outputs/debug"
+    debug_steps: int = 100
 
     # env
     env_config: dict = field(default_factory=lambda: {
@@ -21,38 +23,38 @@ class Config:
 
     # replay buffer
     buffer_capacity: int = 100000
-    batch_size: int = 16
+    batch_size: int = 32
     seq_len: int = 20
 
     # architecture
     input_channels: int = 3
 
     embedding_dim: int = 4096
-    deter_dim: int = 200
+    deter_dim: int = 300
     stoch_dim: int = 30
-    model_hidden_dim: int = 200
-    ac_hidden_dim: int = 128
+    model_hidden_dim: int = 256
+    ac_hidden_dim: int = 256
+    action_dim: int | None = None  # insert action dim after creating environment
 
     lr_world_model: float = 1e-4
-    lr_actor_critic: float = 1e-4
-    imagination_horizon: int = 20
+    lr_actor_critic: float = 3e-5
+    imagination_horizon: int = 3
 
-    action_dim: int | None = None  # insert action dim after creating environment
     gamma: float = 0.99
     lambda_: float = 0.95
 
     grad_clip: float = 100.0
 
     # training
-    warmup_steps: int = 5000
+    warmup_steps: int = 10000
     train_steps: int = 10000
     wm_updates_per_step: int = 1
     ac_updates_per_step: int = 1
-    collect_steps: int = 100
+    collect_steps: int = 20
 
     # evaluation
-    eval_episodes: int = 5
-    eval_every: int = 200
+    eval_episodes: int = 10
+    eval_every: int = 1000
 
     # logging / saving
     log_every: int = 50

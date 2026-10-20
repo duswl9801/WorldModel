@@ -8,12 +8,12 @@ def train(config, env, agent, replay_buffer, train_logger, run_dir):
     for step in range(1, config.train_steps + 1):
         for _ in range(config.wm_updates_per_step):
             batch = replay_buffer.sample_sequence_batch(config.batch_size)
-            wm_metrics = agent.train_world_model(batch)
+            wm_metrics = agent.train_world_model(batch, step=step)
             train_logger.log_dict(wm_metrics)
 
         for _ in range(config.ac_updates_per_step):
             batch = replay_buffer.sample_sequence_batch(config.batch_size)
-            ac_metrics = agent.train_actor_critic(batch)
+            ac_metrics = agent.train_actor_critic(batch, step=step)
             train_logger.log_dict(ac_metrics)
 
         collect_agent_steps(
