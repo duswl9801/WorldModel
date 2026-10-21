@@ -6,9 +6,10 @@ class ReplayBuffer:
         self.capacity = capacity
         self.seq_len = seq_len
         self.buffer = []
-        self.position = 0
+        self.position = 0 # index where the next transition will be stored
         self.full = False
 
+    # save transition.
     # when the buffer is full. start overwrite from the beginning
     def add(self, frame, action, reward, next_frame, done, truncated=False):
         transition = {
@@ -35,18 +36,22 @@ class ReplayBuffer:
         batch = [self.buffer[i] for i in indices]
         return batch
 
-    # check whether [start, end] crosses the current write pointer in a full circular buffer
-    # if it does, that sequence contains overwritten / invalid ordering
+    # check if a sampled sequence crosses the boundary between the newest and oldest transitions.
+    # return True -> invalid sequence (cross the write pointer)
+    # return False -> does not cross the write pointer
     def _crosses_write_pointer(self, start, end):
         if not self.full:
             return False
 
-        # normal case
+        # normal case: start <= end
+        # invalid if the write pointer is after start and within the sequence.
         if start <= end:
-            return start <= self.position <= end
-        # wrapped case
+            return start < self.position <= end
+
+        # wrapped case: sequence wraps from the last index 0
+        # invalid if the write pointer is in the wrapped sequence after start.
         else:
-            return self.position >= start or self.position <= end
+            return self.position > start or self.position <= end
 
     """
     A valid sequence:
@@ -56,6 +61,7 @@ class ReplayBuffer:
     """
     def _is_valid_sequence_start(self, start_idx):
         n = len(self.buffer)
+
         if n < self.seq_len:
             return False
 
@@ -84,20 +90,38 @@ class ReplayBuffer:
         if n < self.seq_len:
             raise ValueError("Not enough transitions to sample a sequence batch.")
 
-        # select valid start indices
+        # define possible sequence start indices
         if not self.full:
-            candidate_starts = list(range(0, n - self.seq_len + 1))
+            candidate_starts = range(0, n - self.seq_len + 1)
         else:
-            candidate_starts = list(range(0, self.capacity))
+            candidate_starts = range(self.capacity)
 
-        valid_starts = [s for s in candidate_starts if self._is_valid_sequence_start(s)]
+        start_indices = []
+        selected = set()
 
-        if len(valid_starts) < batch_size:
-            raise ValueError(
-                f"Not enough valid sequences. requested={batch_size}, available={len(valid_starts)}"
-            )
+        max_attempts = batch_size * 50
+        attempts = 0
 
-        start_indices = np.random.choice(valid_starts, batch_size, replace=False)
+        # randomly sample valid sequences
+        while len(start_indices) < batch_size and attempts < max_attempts:
+            start = np.random.randint(0, len(candidate_starts))
+            attempts += 1
+
+            if start in selected:
+                continue
+
+            if self._is_valid_sequence_start(start):
+                start_indices.append(start)
+                selected.add(start)
+
+        # fallback: scan all candidates if random sampling fails
+        if len(start_indices) < batch_size:
+            valid_starts = [s for s in candidate_starts if self._is_valid_sequence_start(s)]
+
+            if len(valid_starts) < batch_size:
+                raise ValueError("Not enough valid sequences.")
+
+            start_indices = np.random.choice(valid_starts, batch_size, replace=False)
 
         batch_sequences = []
         for start in start_indices:
@@ -144,10 +168,18 @@ class ReplayBuffer:
             data = pickle.load(f)
 
         if isinstance(data, dict):
+            # check if the saved buffer configuration matches the current configuration
+            if data["capacity"] != self.capacity:
+                raise ValueError(
+                    f"Capacity mismatch: saved={data['capacity']}, current={self.capacity}"
+                )
+
+            if data["seq_len"] != self.seq_len:
+                raise ValueError(
+                    f"Sequence length mismatch: saved={data['seq_len']}, current={self.seq_len}"
+                )
             self.buffer = data["buffer"]
             self.position = data["position"]
-            self.capacity = data["capacity"]
-            self.seq_len = data["seq_len"]
             self.full = data["full"]
         else:
             # backward compatibility

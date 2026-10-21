@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 
@@ -49,6 +50,7 @@ class Agent:
             lr=config.lr_actor_critic,
         )
 
+    # convert replay buffer to tensor
     def prepare_batch(self, batch):
         frames = to_tensor(batch["frames"], self.device)  # (B, T, C, H, W)
         actions = to_tensor(batch["actions"], self.device)  # (B, T, A)

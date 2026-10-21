@@ -1,4 +1,5 @@
 import json
+import torch
 import os
 from dataclasses import dataclass, field, asdict
 
@@ -55,13 +56,14 @@ class Config:
     # evaluation
     eval_episodes: int = 10
     eval_every: int = 1000
+    checkpoint_path: str = "outputs/tuning01/checkpoint_step_600.pt"
 
     # logging / saving
     log_every: int = 50
     save_every: int = 500
 
     # device
-    device: str = "cuda"
+    device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
 def save_config(config, run_dir):
     os.makedirs(run_dir, exist_ok=True)

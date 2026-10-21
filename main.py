@@ -33,23 +33,23 @@ def main():
     seed = 42
     set_seed(seed)
 
-    ####### config settings
+    # TODO you modify based on local environment
     device = torch.device(config.device)
     config.output_dir = 'outputs'
 
-
-    # change the name for each experiment
+    # TODO you change the name for each experiment
     run_dir = os.path.join(config.output_dir, "recon_tun01")
     config.debug_dir = os.path.join(run_dir, "debug")
     os.makedirs(run_dir, exist_ok=True)
     os.makedirs(config.debug_dir, exist_ok=True)
 
-    env = make_env(config)
+    train_env = make_env(config)
     eval_env = make_env(config)
 
-    config.action_dim = env.action_space.shape[0]
+    # num of values required to represent an agent's action
+    config.action_dim = train_env.action_space.shape[0]
 
-    ####### create agent, buffer, loffer
+    # create agent, reply buffer, logger
     agent = Agent(config=config, device=device)
 
     replay_buffer = ReplayBuffer(
@@ -60,12 +60,12 @@ def main():
     train_logger = Logger(run_dir, filename="train.csv")
     eval_logger = Logger(run_dir, filename="eval.csv")
 
-    ####### load random buffer
+    # load random buffer
     buffer_path = "outputs/warmup_buffer_10000.pkl"
     replay_buffer.load(buffer_path)
     print(f"Warmup done. buffer size = {len(replay_buffer)}")
 
-    ####### experiment setup
+    # experiment setup
     config.mode = "train"
 
     config.train_steps = 5000
@@ -81,7 +81,7 @@ def main():
     if config.mode == "train":
         run.train(
             config=config,
-            env=env,
+            env=train_env,
             agent=agent,
             replay_buffer=replay_buffer,
             train_logger=train_logger,
@@ -104,7 +104,7 @@ def main():
     elif config.mode == "train_eval":
         metrics, frames = run.train_eval(
             config=config,
-            env=env,
+            env=train_env,
             eval_env=eval_env,
             agent=agent,
             replay_buffer=replay_buffer,
