@@ -134,7 +134,7 @@ class Agent:
         )
 
         # save reconstructions occasionally
-        if step is not None and step % 200 == 0:
+        if step is not None and step % self.config.debug_steps == 0:
             with torch.no_grad():
                 post, prior, pred_reward, recon_obs = self.world_model(
                     frame=frames,
@@ -199,7 +199,7 @@ class Agent:
         )
 
         #####DEBUG
-        if step is not None and step % 200 == 0:
+        if step is not None and step % self.config.debug_steps == 0:
             reward_flat = imagined_rewards.detach().reshape(-1)
             value_flat = imagined_values.detach().reshape(-1)
             cont_flat = imagined_cont.detach().reshape(-1)

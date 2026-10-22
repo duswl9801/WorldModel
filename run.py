@@ -5,6 +5,8 @@ from utils import *
 def train(config, env, agent, replay_buffer, train_logger, run_dir):
     print("===== Training start =====")
 
+    collector_state = None
+
     for step in range(1, config.train_steps + 1):
         for _ in range(config.wm_updates_per_step):
             batch = replay_buffer.sample_sequence_batch(config.batch_size)
@@ -16,13 +18,14 @@ def train(config, env, agent, replay_buffer, train_logger, run_dir):
             ac_metrics = agent.train_actor_critic(batch, step=step)
             train_logger.log_dict(ac_metrics)
 
-        collect_agent_steps(
+        collector_state = collect_agent_steps(
             env=env,
             agent=agent,
             replay_buffer=replay_buffer,
             num_steps=config.collect_steps,
             crop_size=config.crop_size,
             deterministic=False,
+            collector_state=collector_state,
         )
 
         if step % config.log_every == 0:
@@ -62,24 +65,27 @@ def eval(config, env, agent, eval_logger=None, step=None, save_frames=False):
 def train_eval(config, env, eval_env, agent, replay_buffer, train_logger, eval_logger, run_dir, save_frames=False):
     print("===== Training + Evaluation start =====")
 
+    collector_state = None
+
     for step in range(1, config.train_steps + 1):
         for _ in range(config.wm_updates_per_step):
             batch = replay_buffer.sample_sequence_batch(config.batch_size)
-            wm_metrics = agent.train_world_model(batch)
+            wm_metrics = agent.train_world_model(batch, step=step)
             train_logger.log_dict(wm_metrics)
 
         for _ in range(config.ac_updates_per_step):
             batch = replay_buffer.sample_sequence_batch(config.batch_size)
-            ac_metrics = agent.train_actor_critic(batch)
+            ac_metrics = agent.train_actor_critic(batch, step=step)
             train_logger.log_dict(ac_metrics)
 
-        collect_agent_steps(
+        collector_state = collect_agent_steps(
             env=env,
             agent=agent,
             replay_buffer=replay_buffer,
             num_steps=config.collect_steps,
             crop_size=config.crop_size,
             deterministic=False,
+            collector_state=collector_state,
         )
 
         if step % config.log_every == 0:

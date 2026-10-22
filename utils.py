@@ -41,14 +41,17 @@ def collect_random_steps(env, replay_buffer, num_steps, crop_size, seed=None):
             frame = env.render()
             frame = preprocess_frame(frame, crop_size)
 
-def collect_agent_steps(env, agent, replay_buffer, num_steps, crop_size, deterministic=False, seed=None):
-    _, _ = env.reset(seed=seed)
+def collect_agent_steps(env, agent, replay_buffer, num_steps, crop_size, deterministic=False, seed=None, collector_state=None):
+    if collector_state is None:
+        _, _ = env.reset(seed=seed)
 
-    frame = env.render()
-    frame = preprocess_frame(frame, crop_size)
+        frame = env.render()
+        frame = preprocess_frame(frame, crop_size)
 
-    prev_state = None
-    prev_action = None
+        prev_state = None
+        prev_action = None
+    else:
+        frame, prev_state, prev_action = collector_state
 
     for _ in range(num_steps):
         action, post_state = agent.act(
@@ -83,6 +86,8 @@ def collect_agent_steps(env, agent, replay_buffer, num_steps, crop_size, determi
         else:
             prev_state = post_state
             prev_action = action
+
+    return frame, prev_state, prev_action
 
 @torch.no_grad()
 def evaluate_agent(env, agent, crop_size,  num_episodes=5, save_frames=False):
