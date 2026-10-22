@@ -13,7 +13,7 @@ from torch.distributions import Normal
 #   Gaussian policy parameters for continuous action
 #
 # Role:
-#   From the current latent state, choose an action.
+#   Choose an action from the current latent state
 ############################################################
 class Actor(nn.Module):
     def __init__(self, feat_dim, action_dim, hidden_dim):
@@ -176,7 +176,7 @@ class ActorCritic(nn.Module):
 
     # critic learns to match TD(lambda) targets
     def compute_critic_loss(self, imagined_feats, lambda_targets):
-        pred_values = self.critic(imagined_feats)
+        pred_values = self.critic(imagined_feats.detach())
         critic_loss = F.mse_loss(pred_values, lambda_targets.detach())
         return critic_loss
 

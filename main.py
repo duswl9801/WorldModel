@@ -38,7 +38,7 @@ def main():
     config.output_dir = 'outputs'
 
     # TODO you change the name for each experiment
-    run_dir = os.path.join(config.output_dir, "recon_tun01")
+    run_dir = os.path.join(config.output_dir, "renewal_baseline")
     config.debug_dir = os.path.join(run_dir, "debug")
     os.makedirs(run_dir, exist_ok=True)
     os.makedirs(config.debug_dir, exist_ok=True)

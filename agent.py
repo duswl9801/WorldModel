@@ -53,6 +53,7 @@ class Agent:
     # convert replay buffer to tensor
     def prepare_batch(self, batch):
         frames = to_tensor(batch["frames"], self.device)  # (B, T, C, H, W)
+        next_frames = to_tensor(batch["next_frames"], self.device)
         actions = to_tensor(batch["actions"], self.device)  # (B, T, A)
 
         rewards = to_tensor(batch["rewards"], self.device)  # (B, T) or (B, T, 1)
@@ -71,7 +72,7 @@ class Agent:
             if truncateds.dim() == 2:
                 truncateds = truncateds.unsqueeze(-1)
 
-        return frames, actions, rewards, dones, truncateds
+        return frames, actions, next_frames, rewards, dones, truncateds
 
     def initial_state(self, batch_size):
         return self.world_model.initial_state(batch_size, self.device)
@@ -121,16 +122,17 @@ class Agent:
     def train_world_model(self, batch, step=None):
         self.world_model.train()
 
-        frames, actions, rewards, dones, truncateds = self.prepare_batch(batch)
-        init_state = self.initial_state(frames.shape[0])
+        frames, actions, next_frames, rewards, dones, truncateds = self.prepare_batch(batch)
+        #init_state = self.initial_state(frames.shape[0])
 
         losses = self.world_model.compute_losses(
             frame=frames,
             action=actions,
+            next_frame=next_frames,
             reward=rewards,
             dones=dones,
             truncateds=truncateds,
-            state=init_state,
+            state=None,
         )
 
         # save reconstructions occasionally
@@ -139,7 +141,8 @@ class Agent:
                 post, prior, pred_reward, recon_obs = self.world_model(
                     frame=frames,
                     action=actions,
-                    state=init_state,
+                    next_frame=next_frames,
+                    state=None,
                 )
 
             save_reconstruction_grid(
@@ -170,15 +173,23 @@ class Agent:
         self.world_model.train()
         self.actor_critic.train()
 
-        frames, actions, _, _, _ = self.prepare_batch(batch)
+        frames, actions, next_frames, _, _, _ = self.prepare_batch(batch)
         init_state = self.initial_state(frames.shape[0])
 
         # freeze world model parameters during actor-critic update
         for p in self.world_model.parameters():
             p.requires_grad = False
 
+        # infer the starting state from the real replay sequence.
+        with torch.no_grad():
+            post, _, _, _ = self.world_model(
+                frame=frames,
+                action=actions,
+                next_frame=next_frames,
+                state=None,
+            )
         # posterior from real replay sequence
-        post, _, _, _ = self.world_model(frames, actions, init_state)
+        #post, _, _, _ = self.world_model(frames, actions, init_state)
         start_state = self.last_state(post)
 
         imagined_states, imagined_feats, imagined_rewards, imagined_values, imagined_cont = (
@@ -276,22 +287,20 @@ class Agent:
         self.world_model.eval()
         self.actor_critic.eval()
 
-        frames, actions, rewards, _, _ = self.prepare_batch(batch)
+        frames, actions, next_frames, rewards, _, _ = self.prepare_batch(batch)
         init_state = self.initial_state(frames.shape[0])
 
-        post, prior, pred_reward, recon_obs = self.world_model(
-            frames, actions, init_state
-        )
+        post, prior, pred_reward, recon_obs = self.world_model(frames, actions, next_frames, state=None)
 
         metrics = {
             "reward_mse": torch.mean((pred_reward - rewards) ** 2).item(),
-            "recon_mse": torch.mean((recon_obs - frames) ** 2).item(),
+            "recon_mse": torch.mean((recon_obs - next_frames) ** 2).item(),
             "kl": self.world_model.rssm.kl_loss(post, prior).item(),
         }
 
         return {
             "metrics": metrics,
-            "target_frames": frames.detach().cpu(),
+            "target_frames": next_frames.detach().cpu(),
             "recon_frames": recon_obs.detach().cpu(),
             "target_rewards": rewards.detach().cpu(),
             "pred_rewards": pred_reward.detach().cpu(),

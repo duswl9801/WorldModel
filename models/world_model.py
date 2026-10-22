@@ -142,7 +142,24 @@ class WorldModel(nn.Module):
         pred_continue = self.continue_model(feat)
         return pred_continue
 
-    def forward(self, frame, action, state=None):
+    def forward(self, frame, action, next_frame, state=None):
+        # T actions require T+1 observations: [x0, x1, ..., xT]
+        obs_sequence = torch.cat(
+            [frame[:, :1], next_frame],
+            dim=1,
+        )
+        emb = self.encode(obs_sequence)
+
+        post, prior = self.observe_rollout(emb, action, state)
+        post_feat = self.rssm.get_feature(post)
+
+        # post[:, t] represents the state after action[:, t].
+        pred_reward = self.predict_reward(post_feat)
+        recons_frame = self.decode(post_feat)
+
+        return post, prior, pred_reward, recons_frame
+    """
+        def forward(self, frame, action, state=None):
         emb = self.encode(frame)
 
         post, prior = self.observe_rollout(emb, action, state)
@@ -152,23 +169,24 @@ class WorldModel(nn.Module):
         recons_frame = self.decode(post_feat)
 
         return post, prior, pred_reward, recons_frame
+    """
 
     # world model losses inspired by the ELBO(Evidence Lower Bound)
     # 1. reward_loss (predicted reward vs. target reward)
     # 2. kl_loss (prior vs. posterior)
     # 3. recon_loss (reconstructed frame vs. original frame )
-    def compute_losses(self, frame, action, reward, dones=None, truncateds=None, state=None):
+    def compute_losses(self, frame, action, next_frame, reward, dones=None, truncateds=None, state=None):
         kl_scale = 0.1 # can be tuned later to balance reconstruction, reward, and KL losses
         continue_scale = 0.25 # tune later if needed
         reward_scale = 1.5
 
-        post, prior, pred_reward, recon_obs = self.forward(frame, action, state)
+        post, prior, pred_reward, recon_obs = self.forward(frame, action, next_frame, state)
 
         # latent feature from posterior state
         post_feat = self.rssm.get_feature(post)  # (B, T, feat_dim)
 
         reward_loss = F.mse_loss(pred_reward, reward)
-        recon_loss = F.mse_loss(recon_obs, frame)
+        recon_loss = F.mse_loss(recon_obs, next_frame)
         kl_value = self.rssm.kl_loss(post, prior)
 
         # initialize continue loss

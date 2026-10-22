@@ -81,13 +81,36 @@ class RSSM(nn.Module):
     # observe a sequence of embeddings and actions to produce posterior
     # and prior state sequences for world model training
     def observe(self, embeds, actions, state=None):
-
+        """
         B, T, _ = embeds.shape
 
         if state is None:
             state = self.initial_state(B, embeds.device)
         else:
             state = state
+        """
+        B, obs_len, _ = embeds.shape
+        T = actions.shape[1]
+
+        if actions.shape[0] != B or obs_len != T + 1:
+            raise ValueError(
+                "Expected embeds (B, T+1, embed_dim) "
+                "and actions (B, T, action_dim)."
+            )
+
+        if T < 1:
+            raise ValueError("At least one action is required.")
+
+        if state is None:
+            state = self.initial_state(B, embeds.device)
+
+            # incorporate the first observation x0
+            zero_action = actions.new_zeros(B, self.action_dim)
+            state, _ = self.rssm_step(
+                prev_state=state,
+                prev_act=zero_action,
+                embed=embeds[:, 0],
+            )
 
         prior_deters, prior_stochs, prior_means, prior_stds = [], [], [], []
         post_deters, post_stochs, post_means, post_stds = [], [], [], []
@@ -96,7 +119,7 @@ class RSSM(nn.Module):
             post_state, prior_state = self.rssm_step(
                 prev_state=state,
                 prev_act=actions[:, t],
-                embed=embeds[:, t]
+                embed=embeds[:, t+1]
             )
 
             prior_deters.append(prior_state.deter)
@@ -210,7 +233,7 @@ def main():
     ).to(device)
 
     # fake sequence inputs
-    embeds = torch.randn(B, T, embed_dim, device=device)
+    embeds = torch.randn(B, T+1, embed_dim, device=device)
     actions = torch.randn(B, T, action_dim, device=device)
 
     print("=== observe() test ===")
