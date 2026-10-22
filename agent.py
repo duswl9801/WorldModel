@@ -45,10 +45,20 @@ class Agent:
             self.world_model.parameters(),
             lr=config.lr_world_model,
         )
+        self.actor_optimizer = torch.optim.Adam(
+            self.actor_critic.actor.parameters(),
+            lr=config.lr_actor,
+        )
+        self.critic_optimizer = torch.optim.Adam(
+            self.actor_critic.critic.parameters(),
+            lr=config.lr_critic,
+        )
+        """
         self.ac_optimizer = torch.optim.Adam(
             self.actor_critic.parameters(),
             lr=config.lr_actor_critic,
         )
+        """
 
     # convert replay buffer to tensor
     def prepare_batch(self, batch):
@@ -146,7 +156,7 @@ class Agent:
                 )
 
             save_reconstruction_grid(
-                frames=frames,
+                frames=next_frames,
                 recons=recon_obs,
                 debug_dir=os.path.join(self.config.debug_dir, f"recon_step_{step}.png"),
                 max_t=8,
@@ -180,6 +190,11 @@ class Agent:
         for p in self.world_model.parameters():
             p.requires_grad = False
 
+        ###ACTOR TRAINING
+        # freeze critic parameters during actor training
+        for p in self.actor_critic.critic.parameters():
+            p.requires_grad = False
+
         # infer the starting state from the real replay sequence.
         with torch.no_grad():
             post, _, _, _ = self.world_model(
@@ -200,7 +215,8 @@ class Agent:
             )
         )
 
-        bootstrap = imagined_values[:, -1].detach()
+        #bootstrap = imagined_values[:, -1].detach()
+        bootstrap = imagined_values[:, -1]
 
         lambda_targets = self.actor_critic.compute_lambda_targets(
             rewards=imagined_rewards,
@@ -253,11 +269,39 @@ class Agent:
             continues=imagined_cont,
         )
 
+        self.actor_optimizer.zero_grad()
+        actor_loss.backward()
+
+        if getattr(self.config, "grad_clip", None) is not None:
+            nn.utils.clip_grad_norm_(self.actor_critic.actor.parameters(), self.config.grad_clip)
+
+        self.actor_optimizer.step()
+
+        ### CRITIC TRAINING
+        for p in self.actor_critic.critic.parameters():
+            p.requires_grad = True
+
+        # features of source states: [s0, s1, ..., s(H-1)]
+        # imagined_feats: [s₁, s₂, ..., sH]
+        start_feat = self.world_model.rssm.get_feature(start_state)
+
+        critic_feats = torch.cat([start_feat.unsqueeze(1), imagined_feats[:, :-1]], dim=1)
+
         critic_loss = self.actor_critic.compute_critic_loss(
-            imagined_feats=imagined_feats,
+            #imagined_feats=imagined_feats,
+            imagined_feats=critic_feats,
             lambda_targets=lambda_targets,
         )
 
+        self.critic_optimizer.zero_grad()
+        critic_loss.backward()
+
+        if getattr(self.config, "grad_clip", None) is not None:
+            nn.utils.clip_grad_norm_(self.actor_critic.critic.parameters(), self.config.grad_clip)
+
+        self.critic_optimizer.step()
+
+        """
         total_loss = actor_loss + critic_loss
 
         self.ac_optimizer.zero_grad()
@@ -267,6 +311,7 @@ class Agent:
             nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.config.grad_clip)
 
         self.ac_optimizer.step()
+        """
 
         # clear possible leftover grads on world model from imagination graph
         self.wm_optimizer.zero_grad(set_to_none=True)
@@ -278,7 +323,7 @@ class Agent:
         return {
             "actor_loss": actor_loss.item(),
             "critic_loss": critic_loss.item(),
-            "ac_total_loss": total_loss.item(),
+            #"ac_total_loss": total_loss.item(),
         }
 
     # evaluation helper. returns tensors for visualization / sanity check
@@ -318,7 +363,9 @@ class Agent:
             "world_model": self.world_model.state_dict(),
             "actor_critic": self.actor_critic.state_dict(),
             "wm_optimizer": self.wm_optimizer.state_dict(),
-            "ac_optimizer": self.ac_optimizer.state_dict(),
+            "actor_optimizer": self.actor_optimizer.state_dict(),
+            "critic_optimizer": self.critic_optimizer.state_dict(),
+            #"ac_optimizer": self.ac_optimizer.state_dict(),
             "step": step,
             "best_score": best_score,
         }
@@ -333,7 +380,11 @@ class Agent:
         if load_optimizer:
             if "wm_optimizer" in checkpoint:
                 self.wm_optimizer.load_state_dict(checkpoint["wm_optimizer"])
-            if "ac_optimizer" in checkpoint:
-                self.ac_optimizer.load_state_dict(checkpoint["ac_optimizer"])
+            if "actor_optimizer" in checkpoint:
+                self.actor_optimizer.load_state_dict(checkpoint["actor_optimizer"])
+            if "critic_optimizer" in checkpoint:
+                self.critic_optimizer.load_state_dict(checkpoint["critic_optimizer"])
+            #if "ac_optimizer" in checkpoint:
+            #    self.ac_optimizer.load_state_dict(checkpoint["ac_optimizer"])
 
         return checkpoint

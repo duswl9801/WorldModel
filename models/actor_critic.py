@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Normal
 
+
 ############################################################
 # Actor
 #
@@ -67,6 +68,7 @@ class Actor(nn.Module):
 
         return action
 
+
 ############################################################
 # Critic network
 #
@@ -92,7 +94,8 @@ class Critic(nn.Module):
         )
 
     def forward(self, feat):
-        return self.value_net(feat) # (B, horizon, 1)
+        return self.value_net(feat)  # (B, horizon, 1)
+
 
 ############################################################
 # ActorCritic wrapper
@@ -146,15 +149,19 @@ class ActorCritic(nn.Module):
     # compute TD(lambda) targets on imagined trajectories
     # predicted rewards + predicted values + predicted discounts/continues -> lambda targets
     def compute_lambda_targets(self, rewards, values, continues, bootstrap=None):
+        # all inputs correspond to arrival states s1, ..., sH.
+        # returned targets correspond to source states s0, ..., s(H-1).
         B, H, _ = rewards.shape
         device = rewards.device
 
         if bootstrap is None:
-            bootstrap = torch.zeros(B, 1, device=device)
+            bootstrap = values[:, -1]
+            # bootstrap = torch.zeros(B, 1, device=device)
 
         lambda_targets = []
         next_return = bootstrap
 
+        """
         for t in reversed(range(H)):
             if t == H - 1: # the last step
                 next_value = bootstrap
@@ -173,6 +180,21 @@ class ActorCritic(nn.Module):
         lambda_targets = torch.stack(lambda_targets, dim=1)
 
         return lambda_targets # (B, H, 1)
+        """
+
+        for t in reversed(range(H)):
+            next_value = values[:, t]
+            discount = self.gamma * continues[:, t]
+
+            target = rewards[:, t] + discount * (
+                    (1.0 - self.lambda_) * next_value
+                    + self.lambda_ * next_return
+            )
+
+            lambda_targets.append(target)
+            next_return = target
+
+        return torch.stack(lambda_targets[::-1], dim=1)
 
     # critic learns to match TD(lambda) targets
     def compute_critic_loss(self, imagined_feats, lambda_targets):
@@ -187,7 +209,7 @@ class ActorCritic(nn.Module):
         # cumulative product of predicted discounts
         # w_t = prod_{i < t} gamma * c_i
         weights = []
-        running = torch.ones(B, 1, device=lambda_targets.device) # first step weight: 1
+        running = torch.ones(B, 1, device=lambda_targets.device)  # first step weight: 1
 
         for t in range(H):
             weights.append(running)

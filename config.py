@@ -24,7 +24,7 @@ class Config:
 
     # replay buffer
     buffer_capacity: int = 100000
-    batch_size: int = 32
+    batch_size: int = 16
     seq_len: int = 20
 
     # architecture
@@ -38,7 +38,9 @@ class Config:
     action_dim: int | None = None  # insert action dim after creating environment
 
     lr_world_model: float = 1e-4
-    lr_actor_critic: float = 3e-5
+    lr_actor: float = 3e-5
+    lr_critic: float = 3e-5
+    #lr_actor_critic: float = 3e-5
     imagination_horizon: int = 3
 
     gamma: float = 0.99

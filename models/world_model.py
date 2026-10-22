@@ -201,7 +201,8 @@ class WorldModel(nn.Module):
             terminals = truncateds.float()
 
         if terminals is not None:
-            continue_target = 1.0 - terminals  # continue=1, terminal=0
+            continue_target = 1.0 - dones.float()
+            #continue_target = 1.0 - terminals  # continue=1, terminal=0
             pred_continue = self.predict_continue(post_feat)  # (B, T, 1)
             continue_loss = F.binary_cross_entropy(pred_continue, continue_target) # continue model is binary
 
